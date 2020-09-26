@@ -89,10 +89,10 @@ if isempty(ripples.peaks)
     return
 end
 % template (mean both directions together)
-template = (vertcat(data.ratemap{:,1}) + vertcat(data.ratemap{:,2})) ./ 2;
+% template = (vertcat(data.ratemap{:,1}) + vertcat(data.ratemap{:,2})) ./ 2;
 
-% include place cells
-[include,peak_loc] = get_place_cells(data);           
+% find place cells to include & all templates
+[include,peak_loc,template] = get_place_cells(data);           
 if isnan(include) % if no place cells
     replayScores = NaN;
     return
@@ -196,38 +196,53 @@ ripples.peaks = peaks;
 ripples.timestamps = timestamps;
 end
 
-function [include,peak_loc] = get_place_cells(data)
-% % read in list of place cells
-% df = readtable('D:\ryanh\github\harvey_et_al_2020\Rdata_pae_track_cylinder.csv');
-% % get current session and track data
-% df = df(strcmp(df.session,[data.rat,'_',data.sessionID,'.mat']) & df.mazetype == "track",:);
-% % get index of place cells to include
-% if ~isempty(df.tt)
-%     include = find_cells(data,str2double(extractBetween(df.tt,'TT','.mat')),(df.cell));
-% else
-%     include = NaN;
-% end
+function [include,peakloc,template] = get_place_cells(data)
+% get_place_cells: pull rate map that has 1 place field and maximizes
+% firing rate between the two running directions
 
-
-% straighten track
-% [~,data.linear_track{1}.nonlinearFrames(:,2:3),~] =...
-%     pca([data.linear_track{1}.nonlinearFrames(:,2),...
-%      data.linear_track{1}.nonlinearFrames(:,3)]);
-%  
-% XY=interp1(data.linear_track{1}.nonlinearFrames(:,1),...
-%     data.linear_track{1}.nonlinearFrames(:,2:3),spikes.spindices(:,1),'linear');
-data.ratemap
+% check for place field in both directions
 for i = 1:size(data.ratemap,1)
-
-    fields = place_cell_analysis.getPlaceFields('ratemap',template(i,:)');
-    % check if field width is entire track
-    place_field(i) = fields{1, 1}{1, 1}.width ~= size(template,2);
-    % check number of fields
-    n_fields(i) = length(fields{1, 1});
-    % peak location
-    peak_loc(i) = fields{1, 1}{1, 1}.peakLoc;
+    for d = 1:2
+        fields = place_cell_analysis.getPlaceFields('ratemap',data.ratemap{i,d}');
+        % get peak rate
+        peak_rate(i,d) = fields{1, 1}{1, 1}.peakFR;
+        % check if field width is entire track
+        place_field(i,d) = fields{1, 1}{1, 1}.width ~= size(data.ratemap{i,d},2);
+        % check number of fields
+        n_fields(i,d) = length(fields{1, 1});
+        % peak location
+        peak_loc(i,d) = fields{1, 1}{1, 1}.peakLoc;
+    end
 end
-include = find(place_field & n_fields == 1);
+% has one field 
+candidate = place_field & (n_fields == 1);
+
+% find direction with peak rate
+[~,b]=max(peak_rate, [], 2);
+result = zeros(size(peak_rate));
+result(sub2ind(size(peak_rate),1:size(peak_rate,1),b'))=1;
+
+% create bool for field and peak rate, pad with zeros
+candidate = [candidate & result,zeros(size(peak_rate))];
+
+% populate template with map with largest rate
+for i = 1:size(data.ratemap,1)
+    template(i,:) = data.ratemap{i,find(result(i,:))};
+end
+
+% loop over canidates and pull out template (not the best way to do this)
+for i = 1:size(data.ratemap,1)
+    if any(candidate(i,:))
+        template(i,:) = data.ratemap{i,find(candidate(i,:))};
+    end
+end
+
+% pull peak locations
+for i = 1:size(data.ratemap,1)
+    peakloc(i,:) = peak_loc(i,find(result(i,:)));
+end
+
+include = find(any(candidate,2));
 end
 
 function df=construct_df(replayScores)
