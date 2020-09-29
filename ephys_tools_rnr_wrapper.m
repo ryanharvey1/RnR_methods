@@ -1,4 +1,10 @@
 function df = ephys_tools_rnr_wrapper()
+% ephys_tools_rnr_wrapper: wrapper for RnR_methods replay_Bayesian.m
+% This function loops through each sharp wave ripple event to quantify
+% replay.
+%
+% Ryan H
+
 % get sessions to run
 df = readtable('F:\Projects\PAE_PlaceCell\swr_data\post_processed\swr_df.csv');
 data_path = 'F:\Projects\PAE_PlaceCell\ProcessedData\';
@@ -22,9 +28,19 @@ parfor i = 1:length(sessions)
 end
 WaitMessage.Destroy
 
+% load replay events back in
 df = load_all(save_path);
 
-for i = find(abs(df.bayesLinearWeighted) > 0.6)'
+% save table
+df_to_save = df;
+df_to_save.Pr = [];
+writetable(df_to_save,'F:\Projects\PAE_PlaceCell\replay\processed\replay_df.csv')
+
+% save Pr
+Pr = df.Pr;
+save('F:\Projects\PAE_PlaceCell\replay\processed\replay_Pr.mat','Pr')
+
+for i = find(df.pvalue_circular_shuf <= 0.05 & df.pvalue_cellID_shuf <= 0.05)'
     data = load([data_path,df.session{i},'.mat'],'Spikes','ratemap','frames','events');
     track_idx = data.frames(:,1) >= data.events(1,1) & data.frames(:,1) <= data.events(2,1);
     data.frames(track_idx,2) = rescale(data.frames(track_idx,2),1,40);
