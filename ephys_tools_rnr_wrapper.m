@@ -7,7 +7,7 @@ save_path = 'F:\Projects\PAE_PlaceCell\replay\';
 % run through each session
 WaitMessage = parfor_wait(length(unique(df.session)),'Waitbar',false,'ReportInterval',1);
 sessions = unique(df.session);
-for i = 1:length(sessions)
+parfor i = 1:length(sessions)
     if exist([save_path,sessions{i},'.mat'],'file')
         continue
     end
@@ -24,36 +24,56 @@ WaitMessage.Destroy
 
 df = load_all(save_path);
 
-
-for i = find(df.pvalue<0.05)'
+% for i = find(df.pvalue_circular_shuf<0.05 & df.pvalue_cellID_shuf<0.05)'
+for i = find(abs(df.bayesLinearWeighted) > 0.6)'
+    data = load([data_path,df.session{i},'.mat'],'Spikes','ratemap','frames','events');
+    track_idx = data.frames(:,1) >= data.events(1,1) & data.frames(:,1) <= data.events(2,1);
+    data.frames(track_idx,2) = rescale(data.frames(track_idx,2),1,40);
+    idx = data.frames(:,1) >= df.start(i) & data.frames(:,1) <= df.stop(i);    
 
     figure;
-    subplot(2,1,1)
+    subplot(2,2,2)
     imagesc(df.Pr{i}');
     colormap magma
     hold on;
     [~,I] = max(df.Pr{i},[],2);
     plot(1:size(df.Pr{i},1),I,'w')
+    
+    plot(rescale(data.frames(idx,1),1,size(df.Pr{i},1)),data.frames(idx,2),'r')
     title([df.ep_type(i), num2str(df.bayesLinearWeighted(i))])
-    pause(0.00001)
     
-    subplot(2,1,2)
-    data = load([data_path,df.session{i},'.mat'],'Spikes','ratemap');
     
-    % template (mean both directions together)
-    template = (vertcat(data.ratemap{:,1}) + vertcat(data.ratemap{:,2})) ./ 2;
+    subplot(2,2,4)
     % include place cells
-    [include,peak_loc] = get_place_cells(template);
-    [~,idx] = sort(peak_loc,'descend');
-    data.Spikes = data.Spikes(idx);
+    [include,~,template] = get_place_cells(data,1);  
     
+    maps = template(include,:);
+    [~,I] = max(maps,[],2);
+    [~,I] = sort(I,'descend');
+    maps = maps(I,:);
+         
+    data.Spikes = data.Spikes(include);
+    data.Spikes = data.Spikes(I);
+
     spikes = format_spikes(data);
+    
     idx = spikes.spindices(:,1) >= df.start(i) & spikes.spindices(:,1) <= df.stop(i);
-    idx_include = ismember(spikes.spindices(:,2),include);
-    scatter(spikes.spindices(idx & idx_include,1),spikes.spindices(idx & idx_include,2),...
-        20,spikes.spindices(idx & idx_include,2),'filled')
+    
+    scatter(spikes.spindices(idx,1),spikes.spindices(idx,2),...
+        20,spikes.spindices(idx,2),'filled')
+    
     xlim([df.start(i),df.stop(i)])
     ylim([1,max(spikes.spindices(:,2))])
+    
+    subplot(2,2,3)
+
+    for t = 1:size(maps,1)
+        x = zscore(maps(t,:)) + ones(1,size(template,2))+t*2.25;
+        plot(x,'linewidth',3)
+        hold on;
+    end
+    darkBackground(gcf,[0.1 0.1 0.1],[0.7 0.7 0.7])
+    pause(0.00001)
 end
 
 end
@@ -92,14 +112,14 @@ end
 % template = (vertcat(data.ratemap{:,1}) + vertcat(data.ratemap{:,2})) ./ 2;
 
 % find place cells to include & all templates
-[include,peak_loc,template] = get_place_cells(data);           
-if isnan(include) % if no place cells
-    replayScores = NaN;
-    return
-elseif length(include) < 6 % at least 6 place cells
-    replayScores = NaN;
-    return
-end
+% [include,peak_loc,template] = get_place_cells(data,1);           
+% if isnan(include) % if no place cells
+%     replayScores = NaN;
+%     return
+% elseif length(include) < 6 % at least 6 place cells
+%     replayScores = NaN;
+%     return
+% end
 
 % % get candidate events based on Wu and Foster 2014 (spike density)
 % ripples = get_candidate_events(data,spikes,include);
@@ -109,8 +129,8 @@ end
 % end
 
 % Estimates the Bayesian method for replay quantification
-[replayScores] = replay_Bayesian(spikes,ripples,template,include);
-replayScores.peak_loc = peak_loc;
+[replayScores] = replay_Bayesian(data,spikes,ripples);
+% replayScores.peak_loc = peak_loc;
 replayScores.df = cur_df;
 % compareReplayMethods(spikes,ripples,template,include)
 end
@@ -164,7 +184,7 @@ peaks = peaks(find(diff(peaks) > dt+dt/2));
 % restrict to epochs where speed is < 5cm/sec
 speed = interp1(data.frames(:,1),data.frames(:,5),peaks);
 peaks = peaks(speed < 5 | isnan(speed));
-% expand window until event drops below mean (forwards and backwords)
+% expand window until event drops below mean (forwards and backwards)
 for event = 1:length(peaks)
    idx = find(peaks(event) == bin_centers);
    for i = 1:length(bin_centers)
@@ -196,53 +216,71 @@ ripples.peaks = peaks;
 ripples.timestamps = timestamps;
 end
 
-function [include,peakloc,template] = get_place_cells(data)
+function [include,peak_loc,template] = get_place_cells(data,d)
 % get_place_cells: pull rate map that has 1 place field and maximizes
 % firing rate between the two running directions
 
 % check for place field in both directions
 for i = 1:size(data.ratemap,1)
-    for d = 1:2
         fields = place_cell_analysis.getPlaceFields('ratemap',data.ratemap{i,d}');
         % get peak rate
-        peak_rate(i,d) = fields{1, 1}{1, 1}.peakFR;
+        peak_rate(i) = fields{1, 1}{1, 1}.peakFR;
         % check if field width is entire track
-        place_field(i,d) = fields{1, 1}{1, 1}.width ~= size(data.ratemap{i,d},2);
+        place_field(i) = fields{1, 1}{1, 1}.width ~= size(data.ratemap{i,d},2);
         % check number of fields
-        n_fields(i,d) = length(fields{1, 1});
+        n_fields(i) = length(fields{1, 1});
         % peak location
-        peak_loc(i,d) = fields{1, 1}{1, 1}.peakLoc;
-    end
+        peak_loc(i) = fields{1, 1}{1, 1}.peakLoc;
 end
 % has one field 
-candidate = place_field & (n_fields == 1);
+include = find(place_field & (n_fields == 1));
+template = vertcat(data.ratemap{:,d});
 
-% find direction with peak rate
-[~,b]=max(peak_rate, [], 2);
-result = zeros(size(peak_rate));
-result(sub2ind(size(peak_rate),1:size(peak_rate,1),b'))=1;
+% % check for place field in both directions
+% for i = 1:size(data.ratemap,1)
+%     for d = 1:2
+%         fields = place_cell_analysis.getPlaceFields('ratemap',data.ratemap{i,d}');
+%         % get peak rate
+%         peak_rate(i,d) = fields{1, 1}{1, 1}.peakFR;
+%         % check if field width is entire track
+%         place_field(i,d) = fields{1, 1}{1, 1}.width ~= size(data.ratemap{i,d},2);
+%         % check number of fields
+%         n_fields(i,d) = length(fields{1, 1});
+%         % peak location
+%         peak_loc(i,d) = fields{1, 1}{1, 1}.peakLoc;
+%     end
+% end
+% % has one field 
+% candidate = place_field & (n_fields == 1);
 
-% create bool for field and peak rate, pad with zeros
-candidate = [candidate & result,zeros(size(peak_rate))];
 
-% populate template with map with largest rate
-for i = 1:size(data.ratemap,1)
-    template(i,:) = data.ratemap{i,find(result(i,:))};
-end
 
-% loop over canidates and pull out template (not the best way to do this)
-for i = 1:size(data.ratemap,1)
-    if any(candidate(i,:))
-        template(i,:) = data.ratemap{i,find(candidate(i,:))};
-    end
-end
-
-% pull peak locations
-for i = 1:size(data.ratemap,1)
-    peakloc(i,:) = peak_loc(i,find(result(i,:)));
-end
-
-include = find(any(candidate,2));
+% % find direction with peak rate
+% [~,b]=max(peak_rate, [], 2);
+% result = zeros(size(peak_rate));
+% result(sub2ind(size(peak_rate),1:size(peak_rate,1),b'))=1;
+% 
+% % create bool for field and peak rate, pad with zeros
+% candidate = [candidate & result,zeros(size(peak_rate))];
+% 
+% % populate template with map with largest rate
+% for i = 1:size(data.ratemap,1)
+%     template(i,:) = data.ratemap{i,find(result(i,:))};
+% end
+% 
+% % loop over canidates and pull out template (not the best way to do this)
+% for i = 1:size(data.ratemap,1)
+%     if any(candidate(i,:))
+%         template(i,:) = data.ratemap{i,find(candidate(i,:))};
+%     end
+% end
+% 
+% % pull peak locations
+% for i = 1:size(data.ratemap,1)
+%     peakloc(i,:) = peak_loc(i,find(result(i,:)));
+% end
+% 
+% include = find(any(candidate,2));
 end
 
 function df=construct_df(replayScores)
@@ -250,19 +288,18 @@ function df=construct_df(replayScores)
     df.bayesLinearWeighted = replayScores.bayesLinearWeighted(:);
     df.bayesRadon = replayScores.bayesRadon(:);
     df.slope_hpc = replayScores.slope_hpc(:);
-    df.pvalue = replayScores.pvalue(:);
-    df.z = replayScores.z(:);
+    df.pvalue_cellID_shuf = replayScores.pvalue_cellID_shuf(:);
+    df.z_cellID_shuf = replayScores.z_cellID_shuf(:);
+    df.pvalue_circular_shuf = replayScores.pvalue_circular_shuf(:);
+    df.z_circular_shuf = replayScores.z_circular_shuf(:);
 
-%     df.bayesLinearWeighted_cellID_shuf = replayScores.bayesLinearWeighted_cellID_shuf(:);
-%     df.bayesRadon_cellID_shuf = replayScores.bayesRadon_cellID_shuf(:);
-%     df.bayesLinearWeighted_circular_shuf = replayScores.bayesLinearWeighted_circular_shuf(:);
-%     df.bayesRadon_circular_shuf = replayScores.bayesRadon_circular_shuf(:);
     df.nCells = replayScores.nCells(:);
     df.nSpks = replayScores.nSpks(:);
     df.Pr = replayScores.Pr(:);
-%     df.above_shuff = replayScores.above_shuff(:);
     df.start = replayScores.start(:);
     df.stop = replayScores.stop(:);
+    
+    df.direction_used = replayScores.direction_used(:);
 
     idx = isnan(replayScores.bayesLinearWeighted);
     df(idx,:) = [];
