@@ -24,7 +24,6 @@ WaitMessage.Destroy
 
 df = load_all(save_path);
 
-% for i = find(df.pvalue_circular_shuf<0.05 & df.pvalue_cellID_shuf<0.05)'
 for i = find(abs(df.bayesLinearWeighted) > 0.6)'
     data = load([data_path,df.session{i},'.mat'],'Spikes','ratemap','frames','events');
     track_idx = data.frames(:,1) >= data.events(1,1) & data.frames(:,1) <= data.events(2,1);
@@ -108,25 +107,6 @@ if isempty(ripples.peaks)
     replayScores = NaN;
     return
 end
-% template (mean both directions together)
-% template = (vertcat(data.ratemap{:,1}) + vertcat(data.ratemap{:,2})) ./ 2;
-
-% find place cells to include & all templates
-% [include,peak_loc,template] = get_place_cells(data,1);           
-% if isnan(include) % if no place cells
-%     replayScores = NaN;
-%     return
-% elseif length(include) < 6 % at least 6 place cells
-%     replayScores = NaN;
-%     return
-% end
-
-% % get candidate events based on Wu and Foster 2014 (spike density)
-% ripples = get_candidate_events(data,spikes,include);
-% if isempty(ripples.peaks)
-%     replayScores = NaN;
-%     return
-% end
 
 % Estimates the Bayesian method for replay quantification
 [replayScores] = replay_Bayesian(data,spikes,ripples);
@@ -235,52 +215,6 @@ end
 % has one field 
 include = find(place_field & (n_fields == 1));
 template = vertcat(data.ratemap{:,d});
-
-% % check for place field in both directions
-% for i = 1:size(data.ratemap,1)
-%     for d = 1:2
-%         fields = place_cell_analysis.getPlaceFields('ratemap',data.ratemap{i,d}');
-%         % get peak rate
-%         peak_rate(i,d) = fields{1, 1}{1, 1}.peakFR;
-%         % check if field width is entire track
-%         place_field(i,d) = fields{1, 1}{1, 1}.width ~= size(data.ratemap{i,d},2);
-%         % check number of fields
-%         n_fields(i,d) = length(fields{1, 1});
-%         % peak location
-%         peak_loc(i,d) = fields{1, 1}{1, 1}.peakLoc;
-%     end
-% end
-% % has one field 
-% candidate = place_field & (n_fields == 1);
-
-
-
-% % find direction with peak rate
-% [~,b]=max(peak_rate, [], 2);
-% result = zeros(size(peak_rate));
-% result(sub2ind(size(peak_rate),1:size(peak_rate,1),b'))=1;
-% 
-% % create bool for field and peak rate, pad with zeros
-% candidate = [candidate & result,zeros(size(peak_rate))];
-% 
-% % populate template with map with largest rate
-% for i = 1:size(data.ratemap,1)
-%     template(i,:) = data.ratemap{i,find(result(i,:))};
-% end
-% 
-% % loop over canidates and pull out template (not the best way to do this)
-% for i = 1:size(data.ratemap,1)
-%     if any(candidate(i,:))
-%         template(i,:) = data.ratemap{i,find(candidate(i,:))};
-%     end
-% end
-% 
-% % pull peak locations
-% for i = 1:size(data.ratemap,1)
-%     peakloc(i,:) = peak_loc(i,find(result(i,:)));
-% end
-% 
-% include = find(any(candidate,2));
 end
 
 function df=construct_df(replayScores)
