@@ -1,4 +1,4 @@
-function [replayScores] = replay_Bayesian(spikes,ripples,template,include)
+function [replayScores] = replay_Bayesian(df,spikes,ripples)
 % Estimates the Bayesian method for replay quantification
 %
 % USAGE
@@ -41,91 +41,175 @@ function [replayScores] = replay_Bayesian(spikes,ripples,template,include)
 nBinsThresh = 5; % the minimum number of bins, per event, to analyze event (binSize * nBinsThresh = total event duration)
 binSize = .01;
 overlap = 1;
-spkmat = bz_SpktToSpkmat(spikes.times,'overlap',overlap,'binSize',binSize * overlap); % converts spike timestamps into matrix format
+% spkmat = bz_SpktToSpkmat(spikes.times,'overlap',overlap,'binSize',binSize * overlap); % converts spike timestamps into matrix format
+% template = template(include,:);
 
-if ~isempty(include)
-    keep = intersect(include,find(sum(template')>0)); % uncomment to keep all HPC cells that fired
-else
-    keep = find(sum(template')>0); % just remove cells w/ zeros spikes in template
-end
+% if ~isempty(include)
+%     keep = intersect(include,find(sum(template')>0)); % uncomment to keep all HPC cells that fired
+% else
+%     keep = find(sum(template')>0); % just remove cells w/ zeros spikes in template
+% end
 
 for event = 1:size(ripples.timestamps,1)
-    
-    ts = ripples.timestamps(event,:); % gets start/stop timestamp of ripple event
-    [data,counts,start(event),stop(event)] = process_replayData(spkmat, ts, keep, binSize); % processing func to get out the 'event' using common FR heuristics
-    
-    if size(data,1) >= nBinsThresh
-        [Pr, prMax] = placeBayes(data(:,keep), template(keep,:), spkmat.dt); % generate posterior probability matrix using template and event FRs
-        Pr(isnan(Pr)) = 0; % bad form... but some events have 0 spks in a particular time bin, doing this rather than filtering those events out
-        Prs{event} = Pr;
-        [bayesLinearWeighted(event),outID] = makeBayesWeightedCorr1(Pr,ones(size(Pr,1),1)); % linear weight correlation method of quantification (Grosmark/Buzsaki 2016)
-        [slope_hpc(event),bayesRadon(event)] = Pr2Radon(Pr'); % Radon transform method of quantification (Davidson/Frank 2009)
+    % loop through each running direction
+    for d = 1:2
+        % find place cells
+        [include,~,template] = get_place_cells(df,d);
         
-        %% let's add some shuffling
-        for i = 1:1000
-            % cell ID
-            [Pr, ~] = placeBayes(data(:,keep), bz_shuffleCellID(template(keep,:)), spkmat.dt); % generate posterior probability matrix using template and event FRs
-            Pr(isnan(Pr)) = 0; % bad form... but some events have 0 spks in a particular time bin, doing this rather than filtering those events out
-            [bayesLinearWeighted_cellID_shuf(i),outID] = makeBayesWeightedCorr1(Pr,ones(size(Pr,1),1)); % linear weight correlation method of quantification (Grosmark/Buzsaki 2016)
-            %             [slope_hpc_cellID_shuf(i),bayesRadon_cellID_shuf(i)] = Pr2Radon(Pr'); % Radon transform method of quantification (Davidson/Frank 2009)
-            % circular
-            [Pr, ~] = placeBayes(data(:,keep), bz_shuffleCircular(template(keep,:)), spkmat.dt); % generate posterior probability matrix using template and event FRs
-            Pr(isnan(Pr)) = 0; % bad form... but some events have 0 spks in a particular time bin, doing this rather than filtering those events out
-            [bayesLinearWeighted_circular_shuf(i),outID] = makeBayesWeightedCorr1(Pr,ones(size(Pr,1),1)); % linear weight correlation method of quantification (Grosmark/Buzsaki 2016)
-            %             [slope_hpc_circular_shuf(i),bayesRadon_circular_shuf(i)] = Pr2Radon(Pr'); % Radon transform method of quantification (Davidson/Frank 2009)
+        % skip if no place cells
+        if isempty(include)
+            [bayesLinearWeighted(event,d),...
+                slope_hpc(event,d),...
+                bayesRadon(event,d),...
+                Prs{event,d},...
+                z_cellID_shuf(event,d),...
+                pvalue_cellID_shuf(event,d),...
+                z_circular_shuf(event,d),...
+                pvalue_circular_shuf(event,d),...
+                nCells(event,d),...
+                nSpks(event,d)] = set_nan();
+            start(event,d) = nan;
+            stop(event,d) = nan;
+            continue
         end
         
-        z(event) = (abs(bayesLinearWeighted(event)) - abs(mean(bayesLinearWeighted_cellID_shuf))) /...
-            abs(std(bayesLinearWeighted_cellID_shuf));
+        % converts spike timestamps into matrix format
+        spkmat = bz_SpktToSpkmat(spikes.times(include),'overlap',overlap,'binSize',binSize * overlap);
         
-        pvalue(event) = (sum(bayesLinearWeighted(event) > bayesLinearWeighted_cellID_shuf)+1) /...
-            (length(bayesLinearWeighted_cellID_shuf) + 1);
+        % extract and preprocess ripple
         
+        % gets start/stop timestamp of ripple event
+        ts = ripples.timestamps(event,:);
         
-        nCells(event) = sum(sum(counts(:,keep))>0);
-        nSpks(event) = sum(sum(counts(:,keep)));
+        % processing func to get out the 'event' using common FR heuristics
+        [data,counts,start(event,d),stop(event,d)] = process_replayData(spkmat, ts, include, binSize);
         
-    else
-        bayesLinearWeighted(event) = nan;
-        slope_hpc(event) = nan;
-        bayesRadon(event) = nan;
-        
-        Prs{event} = nan;
-        
-        z(event) = nan;
-        pvalue(event) = nan;
-
-%         bayesLinearWeighted_cellID_shuf(event) = nan;
-%         slope_hpc_cellID_shuf(event) = nan;
-%         bayesRadon_cellID_shuf(event) = nan;
-%         bayesLinearWeighted_circular_shuf(event) = nan;
-%         slope_hpc_circular_shuf(event) = nan;
-%         bayesRadon_circular_shuf(event) = nan;
-        
-        nCells(event) = nan;
-        nSpks(event) = nan;
+        % decode ripple
+        [bayesLinearWeighted(event,d),...
+            slope_hpc(event,d),...
+            bayesRadon(event,d),...
+            Prs{event,d},...
+            z_cellID_shuf(event,d),...
+            pvalue_cellID_shuf(event,d),...
+            z_circular_shuf(event,d),...
+            pvalue_circular_shuf(event,d),...
+            nCells(event,d),...
+            nSpks(event,d)] = decode_ripple(data,counts,template(include,:),nBinsThresh,spkmat);
     end
 end
 
+% find direction that maximizes z_circular_shuf
+[~,b]=max(z_circular_shuf, [], 2);
+
 % create data struct to return
-replayScores.bayesLinearWeighted = bayesLinearWeighted;
-replayScores.bayesRadon = bayesRadon;
-replayScores.slope_hpc = slope_hpc;
+for i = 1:length(b)
+    replayScores.bayesLinearWeighted(i,1) = bayesLinearWeighted(i,b(i));
+    replayScores.bayesRadon(i,1) = bayesRadon(i,b(i));
+    replayScores.slope_hpc(i,1) = slope_hpc(i,b(i));
+    
+    replayScores.pvalue_cellID_shuf(i,1) = pvalue_cellID_shuf(i,b(i));
+    replayScores.z_cellID_shuf(i,1) = z_cellID_shuf(i,b(i));
+    replayScores.pvalue_circular_shuf(i,1) = pvalue_circular_shuf(i,b(i));
+    replayScores.z_circular_shuf(i,1) = z_circular_shuf(i,b(i));
+    
+    replayScores.nCells(i,1) = nCells(i,b(i));
+    replayScores.nSpks(i,1) = nSpks(i,b(i));
+    
+    replayScores.Pr{i,1} = Prs{i,b(i)};
+    
+    replayScores.start(i,1) = start(i,b(i));
+    replayScores.stop(i,1) = stop(i,b(i));
+    
+    replayScores.direction_used(i,1) = b(i);
+end
+end
 
-replayScores.pvalue = pvalue;
-replayScores.z = z;
+function z = get_rZ(obs,null)
+z = (abs(obs) - abs(mean(null))) / abs(std(null));
+end
 
-% replayScores.bayesLinearWeighted_cellID_shuf = bayesLinearWeighted_cellID_shuf;
-% replayScores.bayesRadon_cellID_shuf = bayesRadon_cellID_shuf;
-% replayScores.bayesLinearWeighted_circular_shuf = bayesLinearWeighted_circular_shuf;
-% replayScores.bayesRadon_circular_shuf = bayesRadon_circular_shuf;
+function p = get_pvalue(obs,null)
+p = (sum(abs(null) >= abs(obs)) + 1) / (length(null) + 1);
+end
 
+function [include,peak_loc,template] = get_place_cells(data,d)
+for i = 1:size(data.ratemap,1)
+    fields = place_cell_analysis.getPlaceFields('ratemap',data.ratemap{i,d}');
+    % get peak rate
+    peak_rate(i) = fields{1, 1}{1, 1}.peakFR;
+    % check if field width is entire track
+    place_field(i) = fields{1, 1}{1, 1}.width ~= size(data.ratemap{i,d},2);
+    % check number of fields
+    n_fields(i) = length(fields{1, 1});
+    % peak location
+    peak_loc(i) = fields{1, 1}{1, 1}.peakLoc;
+end
+% has one field
+include = find(place_field & (n_fields == 1));
+template = vertcat(data.ratemap{:,d});
+end
 
-replayScores.nCells = nCells;
-replayScores.nSpks = nSpks;
+function  [bayesLinearWeighted,slope_hpc,bayesRadon,Prs,...
+    z_cellID_shuf,pvalue_cellID_shuf,z_circular_shuf,pvalue_circular_shuf,...
+    nCells,nSpks] = decode_ripple(data,counts,template,nBinsThresh,spkmat)
 
-replayScores.Pr = Prs;
+if size(data,1) >= nBinsThresh && sum(any(data)) > 5
+    [Pr, prMax] = placeBayes(data, template, spkmat.dt); % generate posterior probability matrix using template and event FRs
+    Pr(isnan(Pr)) = 0; % bad form... but some events have 0 spks in a particular time bin, doing this rather than filtering those events out
+    Prs = Pr;
+    [bayesLinearWeighted,outID] = makeBayesWeightedCorr1(Pr,ones(size(Pr,1),1)); % linear weight correlation method of quantification (Grosmark/Buzsaki 2016)
+    [slope_hpc,bayesRadon] = Pr2Radon(Pr'); % Radon transform method of quantification (Davidson/Frank 2009)
+    
+    %% let's add some shuffling
+    for i = 1:1000
+        % cell ID
+        [Pr, ~] = placeBayes(data, bz_shuffleCellID(template), spkmat.dt); % generate posterior probability matrix using template and event FRs
+        Pr(isnan(Pr)) = 0; % bad form... but some events have 0 spks in a particular time bin, doing this rather than filtering those events out
+        [bayesLinearWeighted_cellID_shuf(i),outID] = makeBayesWeightedCorr1(Pr,ones(size(Pr,1),1)); % linear weight correlation method of quantification (Grosmark/Buzsaki 2016)
+        % circular
+        [Pr, ~] = placeBayes(data, bz_shuffleCircular(template), spkmat.dt); % generate posterior probability matrix using template and event FRs
+        Pr(isnan(Pr)) = 0; % bad form... but some events have 0 spks in a particular time bin, doing this rather than filtering those events out
+        [bayesLinearWeighted_circular_shuf(i),outID] = makeBayesWeightedCorr1(Pr,ones(size(Pr,1),1)); % linear weight correlation method of quantification (Grosmark/Buzsaki 2016)
+    end
+    
+    % get z and pvalues based on shuffled null distribution
+    z_cellID_shuf = get_rZ(bayesLinearWeighted,bayesLinearWeighted_cellID_shuf);
+    pvalue_cellID_shuf = get_pvalue(bayesLinearWeighted,bayesLinearWeighted_cellID_shuf);
+    z_circular_shuf = get_rZ(bayesLinearWeighted,bayesLinearWeighted_circular_shuf);
+    pvalue_circular_shuf = get_pvalue(bayesLinearWeighted,bayesLinearWeighted_circular_shuf);
+    
+    
+    nCells = sum(sum(counts)>0);
+    nSpks = sum(sum(counts));
+    
+else
+    [bayesLinearWeighted,slope_hpc,bayesRadon,Prs,z_cellID_shuf,pvalue_cellID_shuf,...
+        z_circular_shuf,pvalue_circular_shuf,nCells,nSpks] = set_nan();
+end
+end
 
-replayScores.start = start;
-replayScores.stop = stop;
+function  [bayesLinearWeighted,...
+    slope_hpc,...
+    bayesRadon,...
+    Prs,...
+    z_cellID_shuf,...
+    pvalue_cellID_shuf,...
+    z_circular_shuf,...
+    pvalue_circular_shuf,...
+    nCells,...
+    nSpks] = set_nan()
+
+bayesLinearWeighted = nan;
+slope_hpc = nan;
+bayesRadon = nan;
+
+Prs = nan;
+
+z_cellID_shuf = nan;
+pvalue_cellID_shuf = nan;
+z_circular_shuf = nan;
+pvalue_circular_shuf = nan;
+
+nCells = nan;
+nSpks = nan;
 end
