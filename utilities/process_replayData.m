@@ -26,18 +26,18 @@ if ~exist('data','var')
     return
 end
 % cut 0 and 1 spk count bins from the start/end
-while sum(counts(1,keep)) < 2 & size(counts,1) > 1
+while sum(counts(1,:)) < 2 && size(counts,1) > 1
     data = data(2:end,:);
     counts = counts(2:end,:);
     start = start + 1;
 end
-while sum(counts(end,keep)) < 2 & size(counts,1) > 1
+while sum(counts(end,:)) < 2 && size(counts,1) > 1
     data = data(1:end-1,:);
     counts = counts(1:end-1,:);
     stop = stop-1;
 end
 data = data ./ binSize;
 
-start = start / 1000 * spkmat.dt*1000;
-stop = stop / 1000 * spkmat.dt*1000;
+start = (start / 1000) * (spkmat.dt*1000);
+stop = (stop / 1000) * (spkmat.dt*1000);
 end
