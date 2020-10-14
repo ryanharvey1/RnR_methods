@@ -1,4 +1,4 @@
-function [slope integral] = Pr2Radon(varargin)
+function [slope, integral, intercept] = Pr2Radon(varargin)
 % computes max projection line, using radon transform, on Pr matrix
 warning off
 if nargin == 1
@@ -44,7 +44,8 @@ for pk = 1:length(locs)
 
     coeffs = fPolyFit(xx, yy, 1);
     slope(pk) = coeffs(1);
-
+    intercept(pk) = coeffs(2);
+    
     if abs(slope(pk)) < 2 * size(Pr,1) ./ size(Pr,2) & abs(slope(pk)) > 1.5 % rise/run limit to calc integral (must be in the frame)
         for i=1:length(xx)
 %             inds = Restrict(xx(i)-5:xx(i)+5,[1 size(Pr,2)]);
@@ -61,12 +62,14 @@ for pk = 1:length(locs)
     else
         integral(pk) = NaN; clear curve;
         slope(pk) = NaN;
+        intercept(pk) = NaN;
     end
     
 end
 integral = double(integral); % weird typecasting fix
 [integral idx] = max(integral);
 slope = slope(idx);
+intercept = intercept(idx);
 
 if plotting
     offset = xp(I(locs(idx)));

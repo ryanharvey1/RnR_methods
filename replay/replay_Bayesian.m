@@ -62,6 +62,7 @@ for event = 1:size(ripples.timestamps,1)
                 slope_hpc(event,d),...
                 bayesRadon(event,d),...
                 Prs{event,d},...
+                inactive_bins{event,d},...
                 z_cellID_shuf(event,d),...
                 pvalue_cellID_shuf(event,d),...
                 z_circular_shuf(event,d),...
@@ -84,6 +85,9 @@ for event = 1:size(ripples.timestamps,1)
         % processing func to get out the 'event' using common FR heuristics
         [data,counts,start(event,d),stop(event,d)] = process_replayData(spkmat, ts, include, binSize);
         
+        % find time bins with no activity
+        inactive_bins{event,d} = sum(data,2) == 0;
+        
         % decode ripple
         [bayesLinearWeighted(event,d),...
             slope_hpc(event,d),...
@@ -99,7 +103,7 @@ for event = 1:size(ripples.timestamps,1)
 end
 
 % find direction that maximizes z_circular_shuf
-[~,b]=max(z_circular_shuf, [], 2);
+[~,b]=min(pvalue_cellID_shuf, [], 2);
 
 % create data struct to return
 for i = 1:length(b)
@@ -116,7 +120,8 @@ for i = 1:length(b)
     replayScores.nSpks(i,1) = nSpks(i,b(i));
     
     replayScores.Pr{i,1} = Prs{i,b(i)};
-    
+    replayScores.inactive_bins{i,1} = inactive_bins{i,b(i)};
+
     replayScores.start(i,1) = start(i,b(i));
     replayScores.stop(i,1) = stop(i,b(i));
     
@@ -158,7 +163,7 @@ if size(data,1) >= nBinsThresh && sum(any(data)) > 5
     Pr(isnan(Pr)) = 0; % bad form... but some events have 0 spks in a particular time bin, doing this rather than filtering those events out
     Prs = Pr;
     [bayesLinearWeighted,outID] = makeBayesWeightedCorr1(Pr,ones(size(Pr,1),1)); % linear weight correlation method of quantification (Grosmark/Buzsaki 2016)
-    [slope_hpc,bayesRadon] = Pr2Radon(Pr'); % Radon transform method of quantification (Davidson/Frank 2009)
+    [slope_hpc,bayesRadon,intercept] = Pr2Radon(Pr'); % Radon transform method of quantification (Davidson/Frank 2009)
     
     %% let's add some shuffling
     for i = 1:1000
@@ -178,12 +183,11 @@ if size(data,1) >= nBinsThresh && sum(any(data)) > 5
     z_circular_shuf = get_rZ(bayesLinearWeighted,bayesLinearWeighted_circular_shuf);
     pvalue_circular_shuf = get_pvalue(bayesLinearWeighted,bayesLinearWeighted_circular_shuf);
     
-    
     nCells = sum(sum(counts)>0);
     nSpks = sum(sum(counts));
     
 else
-    [bayesLinearWeighted,slope_hpc,bayesRadon,Prs,z_cellID_shuf,pvalue_cellID_shuf,...
+    [bayesLinearWeighted,slope_hpc,bayesRadon,Prs,~,z_cellID_shuf,pvalue_cellID_shuf,...
         z_circular_shuf,pvalue_circular_shuf,nCells,nSpks] = set_nan();
 end
 end
@@ -192,6 +196,7 @@ function  [bayesLinearWeighted,...
     slope_hpc,...
     bayesRadon,...
     Prs,...
+    inactive_bins,...
     z_cellID_shuf,...
     pvalue_cellID_shuf,...
     z_circular_shuf,...
@@ -204,6 +209,7 @@ slope_hpc = nan;
 bayesRadon = nan;
 
 Prs = nan;
+inactive_bins = nan;
 
 z_cellID_shuf = nan;
 pvalue_cellID_shuf = nan;
