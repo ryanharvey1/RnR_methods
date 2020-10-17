@@ -9,8 +9,8 @@ function df = ephys_tools_rnr_wrapper()
 df = readtable('F:\Projects\PAE_PlaceCell\swr_data\post_processed\swr_df.csv');
 data_path = 'F:\Projects\PAE_PlaceCell\ProcessedData\';
 save_path = 'F:\Projects\PAE_PlaceCell\replay\';
-% df = readtable('F:\Projects\PAE_PlaceCell\swr_data\post_processed\swr_df.csv');
-event_times = readtable('F:\Projects\PAE_PlaceCell\multiunit_data\post_processed\mua_df.csv');
+df = readtable('F:\Projects\PAE_PlaceCell\swr_data\post_processed\swr_df.csv');
+% event_times = readtable('F:\Projects\PAE_PlaceCell\multiunit_data\post_processed\mua_df.csv');
 
 % run through each session
 WaitMessage = parfor_wait(length(unique(df.session)),'Waitbar',false,'ReportInterval',1);
