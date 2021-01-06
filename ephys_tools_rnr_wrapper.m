@@ -6,11 +6,11 @@ function df = ephys_tools_rnr_wrapper()
 % Ryan H
 
 % get sessions to run
-df = readtable('F:\Projects\PAE_PlaceCell\swr_data\post_processed\swr_df.csv');
+% df = readtable('F:\Projects\PAE_PlaceCell\swr_data\post_processed\swr_df.csv');
 data_path = 'F:\Projects\PAE_PlaceCell\ProcessedData\';
-save_path = 'F:\Projects\PAE_PlaceCell\replay\';
-df = readtable('F:\Projects\PAE_PlaceCell\swr_data\post_processed\swr_df.csv');
-% event_times = readtable('F:\Projects\PAE_PlaceCell\multiunit_data\post_processed\mua_df.csv');
+save_path = 'F:\Projects\PAE_PlaceCell\analysis\replay\';
+% df = readtable('F:\Projects\PAE_PlaceCell\swr_data\post_processed\swr_df.csv');
+df = readtable('F:\Projects\PAE_PlaceCell\analysis\multiunit_data\post_processed\mua_df.csv');
 
 % run through each session
 WaitMessage = parfor_wait(length(unique(df.session)),'Waitbar',false,'ReportInterval',1);
@@ -22,7 +22,7 @@ parfor i = 1:length(sessions)
     data = load([data_path,sessions{i},'.mat'],'Spikes','events','ratemap',...
         'rat','sessionID','spikesID','linear_track','samplerate','frames');
     
-    replayScores = main(data,event_times);
+    replayScores = main(data,df);
     
     save_data(save_path,sessions{i},replayScores)
     
@@ -46,16 +46,18 @@ for i = 1:length(df.session)
     % remove bins without activity
     y(df.inactive_bins{i}) = [];
     x(df.inactive_bins{i}) = [];
+    
+    y = smoothdata(y,'movmedian',3);
+    
     % get spatial difference between bins
     dy = abs(diff(y));
-    % jumps > 50cm are most likely noise
-    idx = dy < 50;
     % get cumulative distance 
-    df.traj_dist(i) = sum(dy(idx));
+    df.traj_dist(i) = sum(dy);
     % calculate avg speed of trajectory (dist(cm) / time(sec))
     df.traj_speed(i) = df.traj_dist(i) / (((max(x) - min(x)) * 10) / 1000);
     % get mean step size 
-    df.traj_step(i) = mean(dy(idx));
+    df.traj_step(i) = mean(dy);
+    
     
     % [p2,S] = polyfit3(x',y,3,[],w);
     % y = polyval(p2,x)*3;
@@ -93,79 +95,84 @@ for i = 1:length(df.session)
     end
 end
 
+Pr = df.Pr;
+inactive_bins = df.inactive_bins;
+% df = column_cycle_shuff(Pr,df);
+
 % save table
 df_to_save = df;
 df_to_save.Pr = [];
 df_to_save.inactive_bins = [];
 
-mkdir('F:\Projects\PAE_PlaceCell\replay\processed\replay_df')
-writetable(df_to_save,'F:\Projects\PAE_PlaceCell\replay\processed\replay_df.csv')
+mkdir([save_path,'processed\'])
+
+% save df
+writetable(df_to_save,[save_path,'processed\replay_df.csv'])
 
 % save Pr
-Pr = df.Pr;
-save('F:\Projects\PAE_PlaceCell\replay\processed\replay_Pr.mat','Pr')
+save([save_path,'processed\replay_Pr.mat'],'Pr')
 
-inactive_bins = df.inactive_bins;
-save('F:\Projects\PAE_PlaceCell\replay\processed\replay_inactive_bins.mat','inactive_bins')
+% save inactive bins
+save([save_path,'processed\replay_inactive_bins.mat'],'inactive_bins')
 
 
-for i = find(df.pvalue_cellID_shuf <= 0.05)'
-    data = load([data_path,df.session{i},'.mat'],'Spikes','ratemap','frames','events');
-    track_idx = data.frames(:,1) >= data.events(1,1) & data.frames(:,1) <= data.events(2,1);
-    data.frames(track_idx,2) = rescale(data.frames(track_idx,2),1,40);
-    idx = data.frames(:,1) >= df.start(i) & data.frames(:,1) <= df.stop(i);
-    
-    figure;
-    subplot(2,2,2)
-    imagesc(df.Pr{i}');
-    axis xy
-    colormap magma
-    hold on;
-    [~,y] = max(df.Pr{i},[],2);
-    
-    x = 1:size(df.Pr{i},1);
-    
-    y(df.inactive_bins{i}) = [];
-    x(df.inactive_bins{i}) = [];
-    
-    plot(x,y,'w')
-    
-    plot(rescale(data.frames(idx,1),1,size(df.Pr{i},1)),data.frames(idx,2),'r')
-    title([df.ep_type(i), num2str(df.bayesLinearWeighted(i)), df.replay_type{i}])
-    
-    
-    subplot(2,2,4)
-    % include place cells
-    [include,~,template] = get_place_cells(data,df.direction_used(i));
-    
-    maps = template(include,:);
-    [~,I] = max(maps,[],2);
-    [~,I] = sort(I);
-    maps = maps(I,:);
-    
-    data.Spikes = data.Spikes(include);
-    data.Spikes = data.Spikes(I);
-    
-    spikes = format_spikes(data);
-    
-    idx = spikes.spindices(:,1) >= df.start(i) & spikes.spindices(:,1) <= df.stop(i);
-    
-    scatter(spikes.spindices(idx,1),spikes.spindices(idx,2),...
-        20,spikes.spindices(idx,2),'filled')
-    
-    xlim([df.start(i),df.stop(i)])
-    ylim([1,max(spikes.spindices(:,2))])
-    
-    subplot(2,2,3)
-    
-    for t = 1:size(maps,1)
-        x = zscore(maps(t,:)) + ones(1,size(template,2))+t*2.25;
-        plot(x,'linewidth',3)
-        hold on;
-    end
-    darkBackground(gcf,[0.1 0.1 0.1],[0.7 0.7 0.7])
-    pause(0.00001)
-end
+% for i = find(df.pvalue_cellID_shuf <= 0.05)'
+%     data = load([data_path,df.session{i},'.mat'],'Spikes','ratemap','frames','events');
+%     track_idx = data.frames(:,1) >= data.events(1,1) & data.frames(:,1) <= data.events(2,1);
+%     data.frames(track_idx,2) = rescale(data.frames(track_idx,2),1,40);
+%     idx = data.frames(:,1) >= df.start(i) & data.frames(:,1) <= df.stop(i);
+%     
+%     figure;
+%     subplot(2,2,2)
+%     imagesc(df.Pr{i}');
+%     axis xy
+%     colormap magma
+%     hold on;
+%     [~,y] = max(df.Pr{i},[],2);
+%     
+%     x = 1:size(df.Pr{i},1);
+%     
+%     y(df.inactive_bins{i}) = [];
+%     x(df.inactive_bins{i}) = [];
+%     
+%     plot(x,y,'w')
+%     
+%     plot(rescale(data.frames(idx,1),1,size(df.Pr{i},1)),data.frames(idx,2),'r')
+%     title([df.ep_type(i), num2str(df.bayesLinearWeighted(i)), df.replay_type{i}])
+%     
+%     
+%     subplot(2,2,4)
+%     % include place cells
+%     [include,~,template] = get_place_cells(data,df.direction_used(i));
+%     
+%     maps = template(include,:);
+%     [~,I] = max(maps,[],2);
+%     [~,I] = sort(I);
+%     maps = maps(I,:);
+%     
+%     data.Spikes = data.Spikes(include);
+%     data.Spikes = data.Spikes(I);
+%     
+%     spikes = format_spikes(data);
+%     
+%     idx = spikes.spindices(:,1) >= df.start(i) & spikes.spindices(:,1) <= df.stop(i);
+%     
+%     scatter(spikes.spindices(idx,1),spikes.spindices(idx,2),...
+%         20,spikes.spindices(idx,2),'filled')
+%     
+%     xlim([df.start(i),df.stop(i)])
+%     ylim([1,max(spikes.spindices(:,2))])
+%     
+%     subplot(2,2,3)
+%     
+%     for t = 1:size(maps,1)
+%         x = zscore(maps(t,:)) + ones(1,size(template,2))+t*2.25;
+%         plot(x,'linewidth',3)
+%         hold on;
+%     end
+%     darkBackground(gcf,[0.1 0.1 0.1],[0.7 0.7 0.7])
+%     pause(0.00001)
+% end
 
 end
 
@@ -181,7 +188,13 @@ for i = 1:length(file)
     if ~isstruct(replayScores)
         continue
     end
-    df=[df;construct_df(replayScores)];
+    try
+        df=[df;construct_df(replayScores)];
+    catch
+        df_temp = construct_df(replayScores);
+        idx = ismember(df_temp.Properties.VariableNames',df.Properties.VariableNames');
+        df=[df;df_temp(:,idx)];
+    end
 end
 end
 
@@ -314,10 +327,15 @@ df = replayScores.df;
 df.bayesLinearWeighted = replayScores.bayesLinearWeighted(:);
 df.bayesRadon = replayScores.bayesRadon(:);
 df.slope_hpc = replayScores.slope_hpc(:);
+
 df.pvalue_cellID_shuf = replayScores.pvalue_cellID_shuf(:);
 df.z_cellID_shuf = replayScores.z_cellID_shuf(:);
+
 df.pvalue_circular_shuf = replayScores.pvalue_circular_shuf(:);
 df.z_circular_shuf = replayScores.z_circular_shuf(:);
+
+df.pvalue_column_cycle = replayScores.pvalue_column_cycle(:);
+df.z_column_cycle = replayScores.z_column_cycle(:);
 
 df.nCells = replayScores.nCells(:);
 df.nSpks = replayScores.nSpks(:);
@@ -332,4 +350,32 @@ df.direction_used = replayScores.direction_used(:);
 
 idx = isnan(replayScores.bayesLinearWeighted);
 df(idx,:) = [];
+end
+% 
+% function df = column_cycle_shuff(Pr,df)
+% for i = 1:length(Pr)
+%    map = Pr{i};
+%    
+%    for shuff = 1:1000
+%        r = floor(1 + (size(map,2)-1).*rand(size(map,1),1));
+%        for s = 1:size(map,1)
+%            temp_map(s,:) = circshift(map(s,:), r(s));
+%        end
+%        
+%        [blw_null(shuff),~] = makeBayesWeightedCorr1(temp_map,ones(size(temp_map,1),1));
+%        clear temp_map
+%    end
+%    z(i) = get_rZ(df.bayesLinearWeighted(i),blw_null);
+%    p(i) = get_pvalue(df.bayesLinearWeighted(i),blw_null);
+% end
+% df.z_column_cycle = z';
+% df.pvalue_column_cycle = p';
+% end
+
+function z = get_rZ(obs,null)
+z = (abs(obs) - abs(mean(null))) / abs(std(null));
+end
+
+function p = get_pvalue(obs,null)
+p = (sum(abs(null) >= abs(obs)) + 1) / (length(null) + 1);
 end
