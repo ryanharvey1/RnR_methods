@@ -1,7 +1,16 @@
+save_path = 'F:\Projects\PAE_PlaceCell\analysis\replay\';
 data_path = 'F:\Projects\PAE_PlaceCell\ProcessedData\';
-df = readtable('F:\Projects\PAE_PlaceCell\replay\processed\replay_df.csv');
-Pr = load('F:\Projects\PAE_PlaceCell\replay\processed\replay_Pr.mat','Pr');
 
+% load df
+df = readtable([save_path,'processed\replay_df.csv']);
+% load Pr
+Pr = load([save_path,'processed\replay_Pr.mat'],'Pr');
+% load inactive bins
+load([save_path,'processed\replay_inactive_bins.mat'],'inactive_bins')
+
+mkdir([save_path,'processed\replay_temp_figs'])
+
+df.ripple_number = df.Var1;
 % df_temp = df(df.pvalue_cellID_shuf < 0.05,:);
 % idx = [148,145,144,143,123,119,115,111,110,98,97,96,76,73,30,1];
 
@@ -10,20 +19,32 @@ df_temp = df(df.pvalue_circular_shuf < 0.05,:);
 %     367,366,361,360,358,357,355,354,351,348,345,335,334,333,329,304,278,273,...
 %     270,259,258,241,226,216,211,168,38,35,33,6,4,2,1];
 
+df_temp = df(df.pvalue_column_cycle < 0.05,:);
+
+alpha = 0.05/2;
+df_temp = df(df.pvalue_cellID_shuf <= alpha & df.pvalue_circular_shuf <= alpha & df.pvalue_column_cycle <= alpha,:);
+
+idx = 1:length(df_temp.session);
 
 % ripple to show
-ripples_to_use_idx = 23628;
-idx = find(df_temp.ripple_number == ripples_to_use_idx);
+% ripples_to_use_idx = 23628;
+% idx = find(df_temp.ripple_number == ripples_to_use_idx);
+
+
+use_all_cells = true; % use all availible cells 
+
+%%
+idx = 66:length(df_temp.session);
 
 % loop through potential replay events
 for rip_n = idx
     data = load([data_path,df_temp.session{rip_n},'.mat']);
    
-    plot_replay(data,df_temp,df,Pr,rip_n,df_temp.start(rip_n)-10,df_temp.stop(rip_n)+10)
+    plot_replay(data,df_temp,df,Pr,rip_n,df_temp.start(rip_n)-10,df_temp.stop(rip_n)+10,use_all_cells,save_path,inactive_bins)
 end
 
 % make plot
-function plot_replay(data,df_temp,df,Pr_replay,rip_n,start,stop)
+function plot_replay(data,df_temp,df,Pr_replay,rip_n,start,stop,use_all_cells,save_path,inactive_bins)
 % set figure defaults
 fig=figure('DefaultAxesFontSize',8,'defaultAxesFontName','Serif','defaultTextFontName','Serif');
 fig.Color = [1,1,1];
@@ -37,37 +58,39 @@ pr_stop = df_temp.stop(rip_n);
 % create figure panels
 
 subplot(3,4,[2.5,4]);
-plot_decoded_position(data,df_temp,rip_n,start,stop)
+plot_decoded_position(data,df_temp,rip_n,start,stop,use_all_cells)
 
 subplot(3,4,[5.6,5.6])
-plot_tuning_curves(data,df_temp,rip_n)
+plot_tuning_curves(data,df_temp,rip_n,use_all_cells)
 
 subplot(3,4,[6.5,8])
-plot_raster(data,start,stop,df_temp,rip_n,pr_start,pr_stop)
+plot_raster(data,start,stop,df_temp,rip_n,pr_start,pr_stop,use_all_cells)
 
 subplot(3,4,[9,10])
-plot_ripple_raster(data,start,stop,pr_start,pr_stop,df_temp,rip_n)
+plot_ripple_raster(data,start,stop,pr_start,pr_stop,df_temp,rip_n,use_all_cells)
                        
 subplot(3,4,[11,12]);
-plot_posterior(Pr_replay,df,df_temp,rip_n)
+plot_posterior(Pr_replay,df,df_temp,rip_n,inactive_bins)
 
 % save pngs to folder (for final version, save to svg)
 id = [df_temp.session{rip_n},'_',...
-    df_temp.group{rip_n},'_',...
     df_temp.ep_type{rip_n},'_',...
     num2str(df_temp.ripple_number(rip_n))];
-saveas(fig,['F:\Projects\PAE_PlaceCell\replay_temp_figs\',id,'.png'])
+saveas(fig,[save_path,'processed\replay_temp_figs\',id,'.png'])
 pause(0.00001)
 close all
 end
 
 % below are functions to make each panel in the plot
-function plot_decoded_position(data,df_temp,rip_n,start,stop)
+function plot_decoded_position(data,df_temp,rip_n,start,stop,use_all_cells)
 
 [frames] = restrict_track(data);
 frames(:,2) = rescale(frames(:,2),1,40);
 
 [include,~,template] = get_place_cells(data,df_temp.direction_used(rip_n));
+if use_all_cells
+    include = 1:size(template,1);
+end
 
 for i = 1:length(data.Spikes)
     rip_idx = data.Spikes{i} >= start &...
@@ -85,12 +108,20 @@ x_obs = interp1(frames(:,1),frames(:,2),spkmat.timestamps);
 
 % generate posterior probability matrix using template and event FRs
 [Pr, x_decoded] = placeBayes(spkmat.data, template(include,:), spkmat.dt); 
-
-h = imagesc(Pr');
+try
+    h = imagesc(Pr',[0,nanmax(Pr(:))*0.5]);
+catch
+    h = imagesc(Pr');
+end
 axis xy
-colormap(gca,(magma(256)));
+% colormap(gca,(magma(256)));
+
+c = bone;
+c = flipud(c);
+colormap(gca,c);
+
 hold on
-plot(x_obs,'w');
+plot(x_obs,'--','color',[1.0000,0,1.0000]);
 xlim([1,length(x_obs)])
 box off
 set(gca,'xtick',[])
@@ -120,7 +151,7 @@ set(gca,'xtick',[])
 xlim([start,stop])
 end
 
-function plot_raster(data,start,stop,df_temp,rip_n,pr_start,pr_stop)
+function plot_raster(data,start,stop,df_temp,rip_n,pr_start,pr_stop,use_all_cells)
 for i = 1:length(data.Spikes)
     rip_idx = data.Spikes{i} >= start &...
         data.Spikes{i} <= stop;
@@ -128,6 +159,9 @@ for i = 1:length(data.Spikes)
 end
 
 [include,~,template] = get_place_cells(data,df_temp.direction_used(rip_n));
+if use_all_cells
+    include = 1:size(template,1);
+end
 maps = template(include,:);
 [~,I] = max(maps,[],2);
 [~,I] = sort(I);
@@ -164,7 +198,7 @@ ylabel('Unit #')
 set(gca,'ytick',[])
 end
 
-function plot_ripple_raster(data,start,stop,pr_start,pr_stop,df_temp,rip_n)
+function plot_ripple_raster(data,start,stop,pr_start,pr_stop,df_temp,rip_n,use_all_cells)
 for i = 1:length(data.Spikes)
     rip_idx = data.Spikes{i} >= start &...
         data.Spikes{i} <= stop;
@@ -172,6 +206,9 @@ for i = 1:length(data.Spikes)
 end
 
 [include,~,template] = get_place_cells(data,df_temp.direction_used(rip_n));
+if use_all_cells
+    include = 1:size(template,1);
+end
 maps = template(include,:);
 [~,I] = max(maps,[],2);
 [~,I] = sort(I);
@@ -182,8 +219,8 @@ temp_spikes = temp_spikes(I);
 clear x y
 for i=1:length(temp_spikes)
     if isempty(temp_spikes{i})
-        x{i} = [];
-        y{i} = [];
+        x{i} = NaN;
+        y{i} = NaN;
         continue
     end
     [x{i},y{i}]=plotSpikeRaster(temp_spikes(i),'PlotType','vertline');
@@ -200,8 +237,11 @@ set(gca,'ytick',[])
 xlim([pr_start,pr_stop])
 end
 
-function plot_tuning_curves(data,df_temp,rip_n)
+function plot_tuning_curves(data,df_temp,rip_n,use_all_cells)
 [include,~,template] = get_place_cells(data,df_temp.direction_used(rip_n));
+if use_all_cells
+    include = 1:size(template,1);
+end
 maps = template(include,:);
 % maps = template;
 [~,I] = max(maps,[],2);
@@ -221,11 +261,21 @@ ylabel('Unit #')
 axis tight
 end
 
-function plot_posterior(Pr_replay,df,df_temp,rip_n)
+function plot_posterior(Pr_replay,df,df_temp,rip_n,inactive_bins)
+
 map = Pr_replay.Pr{df.ripple_number == df_temp.ripple_number(rip_n)};
-imagesc(map');
+inactive_bins = inactive_bins{df.ripple_number == df_temp.ripple_number(rip_n)};
+map(inactive_bins,:) = 0;
+
+imagesc(map'); 
+box off
 axis xy
-colormap(gca,(magma(256)));
+% colormap(gca,(magma(256)));
+
+c = bone;
+c = flipud(c);
+colormap(gca,c);
+
 ylabel('Estimated position')
 set(gca,'xtick',[])
 
