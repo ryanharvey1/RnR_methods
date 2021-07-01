@@ -55,7 +55,7 @@ for event = 1:size(ripples.timestamps,1)
     for d = 1:2
         % find place cells
         [include,~,template] = get_place_cells(df,d);
-        
+        include = 1:size(template,1);
         % skip if no place cells
         if isempty(include)
             [bayesLinearWeighted(event,d),...
@@ -97,6 +97,8 @@ for event = 1:size(ripples.timestamps,1)
             pvalue_cellID_shuf(event,d),...
             z_circular_shuf(event,d),...
             pvalue_circular_shuf(event,d),...
+            z_column_cycle(event,d),...
+            pvalue_column_cycle(event,d),...
             nCells(event,d),...
             nSpks(event,d)] = decode_ripple(data,counts,template(include,:),nBinsThresh,spkmat);
     end
@@ -115,6 +117,9 @@ for i = 1:length(b)
     replayScores.z_cellID_shuf(i,1) = z_cellID_shuf(i,b(i));
     replayScores.pvalue_circular_shuf(i,1) = pvalue_circular_shuf(i,b(i));
     replayScores.z_circular_shuf(i,1) = z_circular_shuf(i,b(i));
+    
+    replayScores.pvalue_column_cycle(i,1) = pvalue_column_cycle(i,b(i));
+    replayScores.z_column_cycle(i,1) = z_column_cycle(i,b(i));
     
     replayScores.nCells(i,1) = nCells(i,b(i));
     replayScores.nSpks(i,1) = nSpks(i,b(i));
@@ -155,7 +160,7 @@ template = vertcat(data.ratemap{:,d});
 end
 
 function  [bayesLinearWeighted,slope_hpc,bayesRadon,Prs,...
-    z_cellID_shuf,pvalue_cellID_shuf,z_circular_shuf,pvalue_circular_shuf,...
+    z_cellID_shuf,pvalue_cellID_shuf,z_circular_shuf,pvalue_circular_shuf,z_column_cycle,pvalue_column_cycle,...
     nCells,nSpks] = decode_ripple(data,counts,template,nBinsThresh,spkmat)
 
 if size(data,1) >= nBinsThresh && sum(any(data)) > 5
@@ -171,24 +176,41 @@ if size(data,1) >= nBinsThresh && sum(any(data)) > 5
         [Pr, ~] = placeBayes(data, bz_shuffleCellID(template), spkmat.dt); % generate posterior probability matrix using template and event FRs
         Pr(isnan(Pr)) = 0; % bad form... but some events have 0 spks in a particular time bin, doing this rather than filtering those events out
         [bayesLinearWeighted_cellID_shuf(i),outID] = makeBayesWeightedCorr1(Pr,ones(size(Pr,1),1)); % linear weight correlation method of quantification (Grosmark/Buzsaki 2016)
+        
         % circular
         [Pr, ~] = placeBayes(data, bz_shuffleCircular(template), spkmat.dt); % generate posterior probability matrix using template and event FRs
         Pr(isnan(Pr)) = 0; % bad form... but some events have 0 spks in a particular time bin, doing this rather than filtering those events out
         [bayesLinearWeighted_circular_shuf(i),outID] = makeBayesWeightedCorr1(Pr,ones(size(Pr,1),1)); % linear weight correlation method of quantification (Grosmark/Buzsaki 2016)
+        
+        % column cycle shuff
+        r = floor(1 + (size(Prs,2)-1).*rand(size(Prs,1),1));
+        for s = 1:size(Prs,1)
+            temp_map(s,:) = circshift(Prs(s,:), r(s));
+        end
+        [bayesLinearWeighted_column_shuf(i),~] = makeBayesWeightedCorr1(temp_map,ones(size(temp_map,1),1));
     end
+
+    
     
     % get z and pvalues based on shuffled null distribution
     z_cellID_shuf = get_rZ(bayesLinearWeighted,bayesLinearWeighted_cellID_shuf);
     pvalue_cellID_shuf = get_pvalue(bayesLinearWeighted,bayesLinearWeighted_cellID_shuf);
+    
     z_circular_shuf = get_rZ(bayesLinearWeighted,bayesLinearWeighted_circular_shuf);
     pvalue_circular_shuf = get_pvalue(bayesLinearWeighted,bayesLinearWeighted_circular_shuf);
+    
+    z_column_cycle = get_rZ(bayesLinearWeighted,bayesLinearWeighted_column_shuf);
+    pvalue_column_cycle = get_pvalue(bayesLinearWeighted,bayesLinearWeighted_column_shuf);
     
     nCells = sum(sum(counts)>0);
     nSpks = sum(sum(counts));
     
 else
-    [bayesLinearWeighted,slope_hpc,bayesRadon,Prs,~,z_cellID_shuf,pvalue_cellID_shuf,...
-        z_circular_shuf,pvalue_circular_shuf,nCells,nSpks] = set_nan();
+    [bayesLinearWeighted,slope_hpc,bayesRadon,Prs,~,...
+        z_cellID_shuf,pvalue_cellID_shuf,...
+        z_circular_shuf,pvalue_circular_shuf,...
+        z_column_cycle,pvalue_column_cycle,...
+        nCells,nSpks] = set_nan();
 end
 end
 
@@ -201,6 +223,8 @@ function  [bayesLinearWeighted,...
     pvalue_cellID_shuf,...
     z_circular_shuf,...
     pvalue_circular_shuf,...
+    z_column_cycle,...
+    pvalue_column_cycle,...
     nCells,...
     nSpks] = set_nan()
 
@@ -215,7 +239,8 @@ z_cellID_shuf = nan;
 pvalue_cellID_shuf = nan;
 z_circular_shuf = nan;
 pvalue_circular_shuf = nan;
-
+z_column_cycle= nan;
+pvalue_column_cycle= nan;
 nCells = nan;
 nSpks = nan;
 end
